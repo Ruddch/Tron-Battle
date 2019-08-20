@@ -1,21 +1,18 @@
 const {performance} = require('perf_hooks');
+
 const xAxis = 30;
 const yAxis = 20;
+let Mode = 'NORM';
 
-let direction = 'UP';
 const mapCords = Array.from({length: xAxis}, v =>
     Array.from({length: yAxis}, () => 1),
 );
-const enemyPoint = [];
-const prevEnemyPoint = [];
-let myPoint;
-const enemyDir = [];
+const Points = [];
+let squares = [0, 0, 0, 0];
 const mapTransactions = [];
-const enemyLog = [[], [], []];
-let numPlayers = 0;
+const Log = [[], [], [], []];
 
 function addTransaction(point, value) {
-    //console.error(point, value)
     const prevValue = mapCords[point.x][point.y];
     mapCords[point.x][point.y] = value;
     mapTransactions.push({point, value: prevValue});
@@ -26,60 +23,65 @@ function cancelTransaction() {
     mapCords[point.x][point.y] = value;
 }
 
-const dirs = {
-    UP: ['UP', 'RIGHT', 'LEFT'],
-    LEFT: ['LEFT', 'UP', 'DOWN'],
-    DOWN: ['DOWN', 'LEFT', 'RIGHT'],
-    RIGHT: ['RIGHT', 'DOWN', 'UP'],
-};
+const VDs = Array.from({length: xAxis}, v =>
+    Array.from({length: yAxis}, () => '_'),
+);
 
 const distances = Array.from({length: xAxis}, v =>
     Array.from({length: yAxis}, () => 1000),
 );
 
-const e1Distances = Array.from({length: xAxis}, v =>
-    Array.from({length: yAxis}, () => 1000),
-);
-const e2Distances = Array.from({length: xAxis}, v =>
-    Array.from({length: yAxis}, () => 1000),
-);
-const e3Distances = Array.from({length: xAxis}, v =>
-    Array.from({length: yAxis}, () => 1000),
-);
+function calcVD(points) {
+    let count = 0;
+    const squares = [0, 0, 0, 0];
+    const acc = [];
+    points = points.map(p => [p]);
+    function fillDistance(_, i) {
+        points[i].forEach(p => {
+            if (p.x !== -1 && VDs[p.x][p.y] === '_') {
+                VDs[p.x][p.y] = i;
+                addTransaction(p, 0);
+                squares[i]++;
+                count++;
+                acc.push(...getAvailablePoints(p));
+            }
+        });
+        points[i].length = 0;
+        points[i].push(...acc);
+        acc.length = 0;
+    }
 
-function calcDistances(point, dir, distances) {
+    VDs.forEach(r => r.forEach((c, i) => (r[i] = '_')));
+
+    while (points.some(p => p.length)) points.forEach(fillDistance);
+
+    for (let i = 0; i < count; i++) cancelTransaction();
+
+    return squares;
+}
+
+function calcMyDistances() {
     let cost = 1;
     const acc = [];
 
     distances.forEach(r => r.forEach((c, i) => (r[i] = 1000)));
+    const point = Points[P];
 
-    if (!point) return distances;
+    distances[point.x][point.y] = 1000;
+    const availablePoints = getAvailablePoints(point);
 
-    distances[point.x][point.y] = 0;
-    const availableDirs = getAvailableDirs(point, dir).map(d => ({
-        dir: d,
-        point,
-    }));
-
-    while (availableDirs.length) {
+    while (availablePoints.length) {
         clearArray(acc);
-        availableDirs.forEach(d => {
-            const nextPoint = getNextPoint(d.point, d.dir);
-            const currCost = distances[nextPoint.x][nextPoint.y];
+        availablePoints.forEach(p => {
+            const currCost = distances[p.x][p.y];
             if (currCost > cost) {
-                distances[nextPoint.x][nextPoint.y] = cost;
-                const ad = getAvailableDirs(nextPoint, d.dir);
-                ad.forEach((d, i, arr) => {
-                    arr[i] = {
-                        dir: d,
-                        point: nextPoint,
-                    };
-                });
-                acc.push(...ad);
+                distances[p.x][p.y] = cost;
+                const ap = getAvailablePoints(p);
+                acc.push(...ap);
             }
         });
-        clearArray(availableDirs);
-        availableDirs.push(...acc);
+        clearArray(availablePoints);
+        availablePoints.push(...acc);
         cost++;
     }
     return distances;
@@ -89,265 +91,25 @@ function clearArray(array) {
     while (array.length) array.pop();
 }
 
-function getDistanceDiff() {
-    let meCloser = 0;
-    let enemy1Closer = 0;
-    let enemy2Closer = 0;
-    let enemy3Closer = 0;
-    for (let x = 0; x < xAxis; x++) {
-        for (let y = 0; y < yAxis; y++) {
-            if (
-                distances[x][y] < e1Distances[x][y] &&
-                distances[x][y] < e2Distances[x][y] &&
-                distances[x][y] < e3Distances[x][y]
-            )
-                meCloser++;
-            if (
-                e1Distances[x][y] < distances[x][y] &&
-                e1Distances[x][y] < e2Distances[x][y] &&
-                e1Distances[x][y] < e3Distances[x][y] 
-            )
-                enemy1Closer++;
-            if (
-                e2Distances[x][y] < distances[x][y] &&
-                e2Distances[x][y] < e1Distances[x][y] &&
-                e2Distances[x][y] < e3Distances[x][y] 
-            )
-                enemy2Closer++;
-                
-            if (
-                e3Distances[x][y] < distances[x][y] &&
-                e3Distances[x][y] < e1Distances[x][y] &&
-                e3Distances[x][y] < e2Distances[x][y] 
-            )
-                enemy3Closer++;
-        }
-    }
-    return meCloser - (enemy1Closer + enemy1Closer + enemy1Closer) / (numPlayers - 1);//Math.max(enemy1Closer, enemy2Closer, enemy3Closer);
+function notCrash({x, y}) {
+    if (!(mapCords[x] || [])[y] || x < 0 || x > 29 || y < 0 || y > 19)
+        return false;
+    return true;
 }
 
-function getNextPoint({x, y} = {}, direction) {
-    if (direction === 'UP') return {x, y: --y};
-    if (direction === 'DOWN') return {x, y: ++y};
-    if (direction === 'LEFT') return {x: --x, y};
-    if (direction === 'RIGHT') return {x: ++x, y};
-    if (direction === 'DEAD') return undefined;
+function getPossiblePoints({x, y} = {}) {
+    return [{x, y: y - 1}, {x, y: y + 1}, {x: x - 1, y}, {x: x + 1, y}];
 }
 
-function notCrash({x, y}, dir) {
-    if (!(mapCords[x] || [])[y]) return false;
-    if (dir === 'UP') return y >= 0;
-    else if (dir === 'DOWN') return y < yAxis;
-    else if (dir === 'LEFT') return x >= 0;
-    else return x < xAxis;
-}
-
-function reduceOwnDirs(
-    point,
-    dir,
-    enemyPoint1,
-    enemyDir1,
-    enemyPoint2,
-    enemyDir2,
-    enemyPoint3,
-    enemyDir3,
-    depth,
-    branch,
-) {
-    if (depth > 0) {
-        const availableDirs = getAvailableDirs(point, dir);
-        const f = numPlayers > 2 ? getSum : getDeepSum;
-        return (
-            availableDirs.reduce(
-                (sum, d) =>
-                    sum +
-                    f(
-                        getNextPoint(point, d),
-                        d,
-                        branch !== 1
-                            ? enemyPoint1
-                            : getNextPoint(enemyPoint1, enemyDir1),
-                        enemyDir1,
-                        branch !== 2
-                            ? enemyPoint2
-                            : getNextPoint(enemyPoint2, enemyDir2),
-                        enemyDir2,
-                        branch !== 3
-                            ? enemyPoint3
-                            : getNextPoint(enemyPoint3, enemyDir3),
-                        enemyDir3,
-                        depth - 1,
-                        branch,
-                    ),
-                availableDirs.length ? 1 : -200,
-            ) / (availableDirs.length || 1)
-        );
-    } else {
-        return getSum(
-            point,
-            dir,
-            enemyPoint1,
-            enemyDir1,
-            enemyPoint2,
-            enemyDir2,
-            enemyPoint3,
-            enemyDir3,
-        );
-    }
-}
-
-function getDeepSum(
-    point,
-    dir,
-    enemyPoint1,
-    enemyDir1,
-    enemyPoint2,
-    enemyDir2,
-    enemyPoint3,
-    enemyDir3,
-    depth,
-    branch,
-) {
-    addTransaction(point, 0);
-    if (enemyPoint1) addTransaction(enemyPoint1, 0);
-    if (enemyPoint2) addTransaction(enemyPoint2, 0);
-    if (enemyPoint3) addTransaction(enemyPoint3, 0);
-    const availableEnemyDir1 = getAvailableDirs(enemyPoint1, enemyDir1);
-    const availableEnemyDir2 = getAvailableDirs(enemyPoint2, enemyDir2);
-    const availableEnemyDir3 = getAvailableDirs(enemyPoint3, enemyDir3);
-    const isEnemy1 = branch === 1 || branch === 0;
-    const isEnemy2 = branch === 2 || branch === 0;
-    const isEnemy3 = branch === 3 || branch === 0;
-    
-    const e1Sum =
-        isEnemy1 && enemyPoint1
-            ? availableEnemyDir1.reduce(
-                  (eSum, ed) =>
-                      eSum +
-                      reduceOwnDirs(
-                          point,
-                          dir,
-                          enemyPoint1,
-                          ed,
-                          depth || isEnemy1 ? enemyPoint2 : undefined,
-                          enemyDir2,
-                          depth || isEnemy1 ? enemyPoint3 : undefined,
-                          enemyDir3,
-                          depth,
-                          1,
-                      ),
-                  availableEnemyDir1.length ? 1 : 100,
-              ) / (availableEnemyDir1.length || 1)
-            : 1;
-    
-    const e2Sum =
-        isEnemy2 && enemyPoint2
-            ? availableEnemyDir2.reduce(
-                  (eSum, ed) =>
-                      eSum +
-                      reduceOwnDirs(
-                          point,
-                          dir,
-                          depth || isEnemy2 ? enemyPoint1 : undefined,
-                          enemyDir1,
-                          enemyPoint2,
-                          ed,
-                          depth || isEnemy2 ? enemyPoint3 : undefined,
-                          enemyDir3,
-                          depth,
-                          2,
-                      ),
-                  availableEnemyDir2.length ? 1 : 100,
-              ) / (availableEnemyDir2.length || 1)
-            : 1;
-            
-    const e3Sum =
-        isEnemy3 && enemyPoint3
-            ? availableEnemyDir3.reduce(
-                  (eSum, ed) =>
-                      eSum +
-                      reduceOwnDirs(
-                          point,
-                          dir,
-                          depth || isEnemy2 ? enemyPoint1 : undefined,
-                          enemyDir1,
-                          depth || isEnemy1 ? enemyPoint2 : undefined,
-                          enemyDir2,
-                          enemyPoint3,
-                          ed,
-                          depth,
-                          3,
-                      ),
-                  availableEnemyDir3.length ? 1 : 100,
-              ) / (availableEnemyDir1.length || 1)
-            : 1;
-    cancelTransaction();
-    if (enemyPoint1) cancelTransaction();
-    if (enemyPoint2) cancelTransaction();
-    if (enemyPoint3) cancelTransaction();
-    return (e2Sum + e1Sum + e3Sum) / (numPlayers - 1);
-}
-
-function getAvailableDirs({x, y} = {}, dir) {
-    const possibleDirs = dirs[dir];
-    const res = possibleDirs
-        ? possibleDirs.filter(d => {
-              const point = getNextPoint({x, y}, d);
-              return notCrash(point, d);
-          })
-        : ['DEAD'];
+function getAvailablePoints(point) {
+    const possiblePoints = getPossiblePoints(point);
+    const res = possiblePoints.filter(p => notCrash(p));
     return res;
 }
 
-const getSum = function(point, dir, enemyPoint1, eDir1, enemyPoint2, eDir2) {
-    calcDistances(point, dir, distances);
-    addTransaction(point, 1);
-    calcDistances(enemyPoint1, eDir1, e1Distances);
-    calcDistances(enemyPoint2, eDir2, e2Distances);
-    cancelTransaction();
-    const diff = getDistanceDiff();
-    return diff;
-};
-
-const whatDirNext = ({x, y}, dir) => {
-    const availableDirs = getAvailableDirs({x, y}, dir);
-    //if (step === 1) return availableDirs[0];
-    const countedDirs = availableDirs.map(d => ({
-        sum: getDeepSum(
-            getNextPoint({x, y}, d),
-            d,
-            enemyPoint[0],
-            enemyDir[0],
-            enemyPoint[1],
-            enemyDir[1],
-            enemyPoint[2],
-            enemyDir[2],
-            1,
-            0,
-        ),
-        dir: d,
-    }));
-    let res = countedDirs[0] || {dir: 'UP'};
-    countedDirs.forEach(d => {
-        if (d.sum > res.sum) res = d;
-    });
-    //console.error(countedDirs);
-
-    return res.dir;
-};
-
-function getEnemyDir(point, prevPoint) {
-    if (!point) return 'DEAD';
-    let dir = 'UP';
-    if (point.x - prevPoint.x > 0) dir = 'RIGHT';
-    else if (point.x - prevPoint.x < 0) dir = 'LEFT';
-    else if (point.y - prevPoint.y > 0) dir = 'DOWN';
-
-    return dir;
-}
-
 function printMap(map) {
-    for (let i = 0; i < yAxis; i++) console.error(map.map(j => j[i]));
+    for (let i = 0; i < yAxis; i++)
+        console.error(map.reduce((str, j) => str + j[i] + '|', ''));
 
     console.error('================');
 }
@@ -363,20 +125,189 @@ function measureTime(f, name) {
 }
 
 function killEnemy(i) {
-    while (enemyLog[i].length) {
-        const point = enemyLog[i].pop();
+    while (Log[i].length) {
+        const point = Log[i].pop();
         mapCords[point.x][point.y] = 1;
     }
 }
 
+function getReachable(points) {
+    points.forEach((p, i) => {
+        if (p.x > -1 && i !== P) addTransaction(p, 1);
+    });
+    calcMyDistances();
+    const res = [];
+    points.forEach((p, i) => {
+        if (p.x > -1 && i !== P) {
+            if (distances[p.x][p.y] < 1000) res.push(i);
+            cancelTransaction();
+        }
+    });
+    return res;
+}
+function isBorder({x, y}) {
+    return x === 0 || x === 29 || y === 19 || y === 0;
+}
+
+function isNear({x, y}) {
+    return (
+        isBorder({x, y}) ||
+        (distances[x - 1][y + 1] === 1000 ||
+            distances[x + 1][y + 1] === 1000 ||
+            distances[x - 1][y - 1] === 1000 ||
+            distances[x + 1][y - 1] === 1000)
+    );
+}
+
+function calcScore(points, i) {
+    const s = calcVD(points);
+    const eSquares = squares.filter((s, i) => i !== P);
+    const mySquare = s[P];
+
+    return {
+        squares: s,
+        score:
+            mySquare -
+            (!isNaN(i)
+                ? squares[i]
+                : eSquares.reduce((sum, s) => sum + s, 0) / eSquares.length),
+    };
+}
+
+const mapPointTransactions = [];
+
+function addPointsTransaction(point, i) {
+    const prevPoint = Points[i];
+    Points[i] = point;
+    mapPointTransactions.push({i, point: prevPoint});
+}
+
+function cancelPointsTransaction() {
+    const {i, point} = mapPointTransactions.pop();
+    Points[i] = point;
+}
+
+const mapSquareTransactions = [];
+
+function addSquaresTransaction(s) {
+    const prevSquares = [...squares];
+    squares = s;
+    mapSquareTransactions.push(prevSquares);
+}
+
+function cancelSquaresTransaction() {
+    const s = mapSquareTransactions.pop();
+    squares = s;
+}
+
+function calcRScore(myPoint) {
+    addTransaction(myPoint, 0);
+    const result = [];
+    addPointsTransaction(myPoint, P);
+
+    let calcScoreRes = calcScore(Points);
+    addSquaresTransaction(calcScoreRes.squares);
+
+    result.push(calcScoreRes.score);
+    if (step === 30) printMap(VDs);
+    let depth;
+    if (Mode === 'FILL') depth = 2;
+    else if (activeEnemy > 2) depth = 0;
+    else depth = 1;
+
+    iter(depth);
+
+    function iter(depth) {
+        if (Mode !== 'FILL') {
+            Points.forEach((p, i) => {
+
+                if (i !== P && p.x !== -1) {
+                    const availablePoints = getAvailablePoints(p);
+                    if (!availablePoints.length) {
+                        result.push(
+                            squares[P] *
+                                (getAvailablePoints(Points[P]).length + 1),
+                        );
+                    }
+
+                    availablePoints.forEach(availableP => {
+                        addTransaction(availableP, 0);
+                        addPointsTransaction(availableP, i);
+                        calcScoreRes = calcScore(Points, i);
+                        addSquaresTransaction(calcScoreRes.squares);
+
+                        result.push(calcScoreRes.score);
+                        calcMyPoints(Points[P], depth, i);
+
+                        cancelSquaresTransaction();
+                        cancelPointsTransaction();
+                        cancelTransaction();
+                    });
+                }
+            });
+        } else {
+            calcMyPoints(Points[P], depth);
+        }
+    }
+
+    function calcMyPoints(point, depth, enemyIndex) {
+        const myAvailablePoints = getAvailablePoints(point);
+        if (!myAvailablePoints.length) result.push(-5000);
+
+        myAvailablePoints.forEach(myAvailablePoint => {
+            addTransaction(myAvailablePoint, 0);
+            addPointsTransaction(myAvailablePoint, P);
+            calcScoreRes = calcScore(Points, enemyIndex);
+            addSquaresTransaction(calcScoreRes.squares);
+
+            result.push(calcScoreRes.score);
+            cancelSquaresTransaction();
+            cancelPointsTransaction();
+            cancelTransaction();
+            if (depth > 0) iter(depth - 1);
+        });
+    }
+
+    cancelSquaresTransaction();
+    cancelPointsTransaction();
+    cancelTransaction();
+    return result;
+}
+
+function getDirByPoint({x, y}) {
+    const {x: xc, y: yc} = Points[P];
+    if (x > xc) return 'RIGHT';
+    if (x < xc) return 'LEFT';
+    if (y > yc) return 'DOWN';
+    if (y < yc) return 'UP';
+}
+
+function whatDirNext() {
+    squares = calcVD(Points);
+    const res = getAvailablePoints(Points[P])
+        .map(p => ({
+            dir: getDirByPoint(p),
+            score: calcRScore(p).reduce(
+                (sum, s, i, arr) => sum + s / arr.length,
+                0,
+            ),
+        }))
+        .sort((a, b) => b.score - a.score);
+    console.error(res);
+    return res[0].dir;
+}
+
 // game loop
 let step = 1;
+let N;
+let P;
+let activeEnemy = 0;
 while (true) {
     const inputs = readline().split(' ');
-    const N = parseInt(inputs[0]); // total number of players (2 to 4).
-    const P = parseInt(inputs[1]); // your player number (0 to 3).
+    N = parseInt(inputs[0]); // total number of players (2 to 4).
+    P = parseInt(inputs[1]); // your player number (0 to 3).
     let count = 0;
-    numPlayers = 0;
+    activeEnemy = 0;
     for (let i = 0; i < N; i++) {
         const inputs = readline().split(' ');
         const X0 = parseInt(inputs[0]); // starting X coordinate of lightcycle (or -1)
@@ -386,24 +317,19 @@ while (true) {
         if (X1 > -1) {
             mapCords[X0][Y0] = 0;
             mapCords[X1][Y1] = 0;
-            numPlayers++;
-        }
-        if (i === P) {
-            myPoint = {x: X1, y: Y1};
+            Log[i].push({x: X1, y: Y1});
+            activeEnemy++;
         } else {
-            prevEnemyPoint[count] = enemyPoint[count] || {};
-            enemyPoint[count] = X1 > -1 ? {x: X1, y: Y1} : undefined;
-            enemyDir[count] = getEnemyDir(
-                enemyPoint[count],
-                prevEnemyPoint[count],
-            );
-            if (X1 > -1) enemyLog[count].push({x: X1, y: Y1});
-            else killEnemy(count);
-            count++;
+            killEnemy(i);
         }
+        Points[i] = {x: X1, y: Y1};
+
+        count++;
     }
-    //printMap(mapCords);
-    direction = whatDirNext(myPoint, direction);
+
+    Mode = getReachable(Points).length ? 'NORM' : 'FILL';
+    console.error(Mode);
+    const direction = measureTime(whatDirNext)();
     step++;
     console.log(direction); // A single line with UP, DOWN, LEFT or RIGHT
 }
